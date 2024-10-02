@@ -12,12 +12,12 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"\n\nmessage": "Hello from W4153-Hello-World-FastAPI!\n\n"}
+    return {"\n\nmessage": "Hello from core_swipe_service_Care2Share!\n\n"}
 
 
 @app.get("/hello/{name}")
 async def hello(name: str):
-    msg = f"Hello {name} from W4153-Hello-World-FastAPI!"
+    msg = f"Hello {name} from core_swipe_service_Care2Share!"
     return {"\n\nmessage": msg}
 
 
