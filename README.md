@@ -1,4 +1,4 @@
-# W4153-Hello-World-FastAPI
+# core_swipe_service_Care2Share
 
 ## Overview
 
@@ -26,7 +26,7 @@ sudo apt update
 
 sudo apt install python3 python3-pip -y
 
-git clonehttps://github.com/donald-f-ferguson/W4153-Hello-World-FastAPI.git
+git clone https://github.com/cpreston123/core_swipe_service_Care2Share.git
 
 sudo apt install python3.12-venv
 
@@ -44,7 +44,7 @@ curl localhost:8000
 - And you should get ...
 ```
 INFO:     127.0.0.1:35572 - "GET / HTTP/1.1" 200 OK
-{"\n\nmessage":"Hello from W4153-Hello-World-FastAPI!\n\n"}(venv)
+{"\n\nmessage":"Hello from core_swipe_service_Care2Share!\n\n"}(venv)
 ```
 
 ### Remote Access
