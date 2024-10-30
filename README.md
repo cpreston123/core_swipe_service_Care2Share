@@ -1,26 +1,23 @@
 # core_swipe_service_Care2Share
 
 ## Overview
+Core swipe service for Care2Share Application (composite service).
+Running on Port 8000.
 
-Simple Hello World FastAPI to help students get their first VM deployed on a cloud.
+### Running and Testing on VM
+```
+source venv/bin/activate
+python3 main.py
+^Z
+bg %1
+curl localhost:8000
+fg %1
+^C
+```
+On browser, access http://localhost:8000/
 
-## Execution
 
-### AWS Instance
-
-- Create a "free tier" compatible instance.
-- Make sure you setup free tier alerting emails.
-- I chose Ubuntu Linux.
-- You can use the default VPC but create a new security group.
-- Make sure you enable remote access.
-- Create a new key pair and save the .pem file somewhere safe.
-- When EC2 instance is running, connect to it by selecting the instance and then
-the connect menu option. Use the default connection manager.
-
-### Running Application
-
-- I used Ubuntu OS on Amazon instance.
-- Some commands:
+### Set up + Running Application Locally
 ```
 sudo apt update
 
@@ -36,32 +33,10 @@ source venv/bin/activate
 
 pip install requirements.txt
 
-python main.py &
-
-curl localhost:8000
+python main.py
 
 ```
-- And you should get ...
-```
-INFO:     127.0.0.1:35572 - "GET / HTTP/1.1" 200 OK
-{"\n\nmessage":"Hello from core_swipe_service_Care2Share!\n\n"}(venv)
-```
-
-### Remote Access
-
-- Navigate to the security group.
-- Add an inbound rule for TCP, port 8000 and 0.0.0.0/0
-
-<img src="inbound-rules.jpg">
-
-- Go back to EC2 instance configuration and get public IP address.
-- Mine was 53.208.146.60
-- Navigate to http://54.208.146.60:8000/ (__Make sure you use HTTP. Browser default to HTTPS.__)
-
-# Finish
-
-- Shutdown and terminate your instance.
-- We can make another one later.
+See above "Running and Testing on VM" to test application
 
 
 
