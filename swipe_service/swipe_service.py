@@ -14,9 +14,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class SwipeToDonate(Base):
-    __tablename__ = "swipes_to_donate"
+    __tablename__ = "Swipes_To_Donate"
     swipe_id = Column(Integer, primary_key=True, autoincrement=True)
-    donor_id = Column(String)
+    donor_id = Column(String(50))
     created_date = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
