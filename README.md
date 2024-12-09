@@ -23,6 +23,8 @@ sudo apt update
 
 sudo apt install python3 python3-pip -y
 
+sudo apt install git -y
+
 git clone https://github.com/cpreston123/core_swipe_service_Care2Share.git
 
 sudo apt install python3-venv
