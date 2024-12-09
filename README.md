@@ -25,13 +25,25 @@ sudo apt install python3 python3-pip -y
 
 git clone https://github.com/cpreston123/core_swipe_service_Care2Share.git
 
+sudo apt install python3-venv
+
+sudo python3 -m venv ./venv
+
+source venv/bin/activate
+
+sudo apt update
+
+sudo apt install python3 python3-pip -y
+
+git clone https://github.com/cpreston123/core_swipe_service_Care2Share.git
+
 sudo apt install python3.12-venv
 
 sudo python3 -m venv ./venv
 
 source venv/bin/activate
 
-pip install requirements.txt
+pip install -r requirements.txt
 
 python main.py
 
