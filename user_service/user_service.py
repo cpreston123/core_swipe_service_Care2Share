@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -33,21 +34,37 @@ class User(Base):
 
 Base.metadata.create_all(bind=engine)
 
-@app.post("/users")
-def create_user(uni: str, current_points: int = 0, current_swipes: int = 0):
+class UserSchema(BaseModel):
+    uni: str
+    current_points: int = 0
+    current_swipes: int = 0
+
+    class Config:
+        orm_mode = True
+
+@app.post("/login")
+def login_or_create_user(user: UserSchema):
     db = SessionLocal()
-    user = db.query(User).filter(User.uni == uni).first()
-    if user:
-        raise HTTPException(status_code=400, detail="User already exists")
-    new_user = User(
-        uni=uni,
-        current_points=current_points,
-        current_swipes=current_swipes
-    )
-    db.add(new_user)
-    db.commit()
-    db.close()
-    return {"message": "User created successfully"}
+    try:
+        # Check if user exists
+        existing_user = db.query(User).filter(User.uni == user.uni).first()
+        if existing_user:
+            return {"message": "User exists", "user": existing_user}
+        
+        # Create new user if not found
+        new_user = User(
+            uni=user.uni,
+            current_points=user.current_points,
+            current_swipes=user.current_swipes,
+        )
+        db.add(new_user)
+        db.commit()
+        return {"message": "New user created", "user": new_user}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error processing request")
+    finally:
+        db.close()
 
 @app.get("/users/{uni}")
 def get_user(uni: str):
