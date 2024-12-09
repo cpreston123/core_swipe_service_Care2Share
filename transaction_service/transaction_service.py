@@ -1,12 +1,11 @@
 from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime, Boolean
+from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel
 import logging
-import random
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -48,7 +47,6 @@ class SwipesToDonate(Base):
     __tablename__ = "Swipes_To_Donate"
     swipe_id = Column(Integer, ForeignKey("User_Swipes.swipe_id"), primary_key=True)
     donor_id = Column(String(50), ForeignKey("Users.uni"), nullable=False)
-    is_used = Column(Boolean, default=False)  # New column to track if swipe is used
 
 class Transaction(Base):
     __tablename__ = "Transactions"
@@ -94,14 +92,13 @@ def create_transaction(
         if not donor or not recipient:
             raise HTTPException(status_code=404, detail="Donor or recipient not found")
 
-        # Verify that the swipe exists, belongs to the donor, and hasn't been used
+        # Verify that the swipe exists and belongs to the donor
         swipe = db.query(SwipesToDonate).filter(
             SwipesToDonate.swipe_id == transaction.swipe_id,
-            SwipesToDonate.donor_id == transaction.donor_id,
-            SwipesToDonate.is_used == False
+            SwipesToDonate.donor_id == transaction.donor_id
         ).first()
         if not swipe:
-            raise HTTPException(status_code=404, detail="Swipe not found, doesn't belong to donor, or has already been used")
+            raise HTTPException(status_code=404, detail="Swipe not found or doesn't belong to donor")
 
         # Create the transaction
         db_transaction = Transaction(
@@ -117,8 +114,8 @@ def create_transaction(
         recipient.swipes_received += 1
         recipient.current_swipes += 1
 
-        # Mark the swipe as used instead of deleting it
-        swipe.is_used = True
+        # Delete the swipe from SwipesToDonate
+        db.delete(swipe)
 
         db.commit()
         db.refresh(db_transaction)
