@@ -2,18 +2,29 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
+# Add CORS middleware globally
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Database setup
-DATABASE_URL = "sqlite:///./user_management.db"
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
+engine = create_engine(DATABASE_URL, echo=True)  # Set echo=True to debug queries
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class User(Base):
-    __tablename__ = "users"
-    uni = Column(String, primary_key=True)
+    __tablename__ = "Users"
+    uni = Column(String(50), primary_key=True)
     swipes_given = Column(Integer, default=0)
     swipes_received = Column(Integer, default=0)
     points_given = Column(Integer, default=0)
@@ -23,21 +34,37 @@ class User(Base):
 
 Base.metadata.create_all(bind=engine)
 
-@app.post("/users")
-def create_user(uni: str, current_points: int = 0, current_swipes: int = 0):
+class UserSchema(BaseModel):
+    uni: str
+    current_points: int = 0
+    current_swipes: int = 0
+
+    class Config:
+        orm_mode = True
+
+@app.post("/login")
+def login_or_create_user(user: UserSchema):
     db = SessionLocal()
-    user = db.query(User).filter(User.uni == uni).first()
-    if user:
-        raise HTTPException(status_code=400, detail="User already exists")
-    new_user = User(
-        uni=uni,
-        current_points=current_points,
-        current_swipes=current_swipes,
-    )
-    db.add(new_user)
-    db.commit()
-    db.close()
-    return {"message": "User created successfully"}
+    try:
+        # Check if user exists
+        existing_user = db.query(User).filter(User.uni == user.uni).first()
+        if existing_user:
+            return {"message": "User exists", "user": existing_user}
+        
+        # Create new user if not found
+        new_user = User(
+            uni=user.uni,
+            current_points=user.current_points,
+            current_swipes=user.current_swipes,
+        )
+        db.add(new_user)
+        db.commit()
+        return {"message": "New user created", "user": new_user}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error processing request")
+    finally:
+        db.close()
 
 @app.get("/users/{uni}")
 def get_user(uni: str):
@@ -47,25 +74,6 @@ def get_user(uni: str):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-@app.post("/users/points/transfer")
-def transfer_points(donor_id: str, recipient_id: str, points: int):
-    db = SessionLocal()
-    donor = db.query(User).filter(User.uni == donor_id).first()
-    recipient = db.query(User).filter(User.uni == recipient_id).first()
-    if not donor or donor.current_points < points:
-        db.close()
-        raise HTTPException(status_code=400, detail="Not enough points available")
-    if not recipient:
-        db.close()
-        raise HTTPException(status_code=404, detail="Recipient not found")
-    donor.current_points -= points
-    donor.points_given += points
-    recipient.current_points += points
-    recipient.points_received += points
-    db.commit()
-    db.close()
-    return {"message": "Points transferred successfully"}
 
 if __name__ == "__main__":
     import uvicorn
