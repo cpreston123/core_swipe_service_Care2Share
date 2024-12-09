@@ -8,6 +8,17 @@ from pydantic import BaseModel
 from swipe_service.swipe_service import Swipe
 from base import Base
 
+
+
+# Add CORS middleware globally
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Database setup
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
 engine = create_engine(DATABASE_URL, echo=True)
@@ -45,6 +56,7 @@ class User(Base):
     current_swipes = Column(Integer, default=0)
 
 Base.metadata.create_all(bind=engine)
+
 
 # Router for user-related endpoints
 user_router = APIRouter()
@@ -88,12 +100,49 @@ def create_user(uni: str, current_points: int = 0, current_swipes: int = 0, db: 
 
     return {"message": "User created successfully"}
 
+  
+ 
+class UserSchema(BaseModel):
+    uni: str
+    current_points: int = 0
+    current_swipes: int = 0
+
+    class Config:
+        orm_mode = True
+
+@app.post("/login")
+def login_or_create_user(user: UserSchema):
+    db = SessionLocal()
+    try:
+        # Check if user exists
+        existing_user = db.query(User).filter(User.uni == user.uni).first()
+        if existing_user:
+            return {"message": "User exists", "user": existing_user}
+        
+        # Create new user if not found
+        new_user = User(
+            uni=user.uni,
+            current_points=user.current_points,
+            current_swipes=user.current_swipes,
+        )
+        db.add(new_user)
+        db.commit()
+        return {"message": "New user created", "user": new_user}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error processing request")
+    finally:
+        db.close()
+
+        
+
 @user_router.get("/users/{uni}")
 def get_user(uni: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.uni == uni).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
 
 # to account for both setting and incrementing/decrementing, is_relative
 @user_router.put("/users/{uni}")
