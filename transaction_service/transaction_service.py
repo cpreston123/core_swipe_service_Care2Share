@@ -1,17 +1,31 @@
 from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
+import logging
+import random
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Database setup for AWS RDS MySQL
-DATABASE_URL = "mysql+pymysql://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Database setup for AWS RDS MySQL with error handling
+try:
+    DATABASE_URL = "mysql+pymysql://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    # Test the connection
+    with engine.connect() as conn:
+        logger.info("Successfully connected to database!")
+except Exception as e:
+    logger.error(f"Failed to connect to database: {str(e)}")
+    raise
+
 Base = declarative_base()
 
 # Database Models
@@ -34,6 +48,7 @@ class SwipesToDonate(Base):
     __tablename__ = "Swipes_To_Donate"
     swipe_id = Column(Integer, ForeignKey("User_Swipes.swipe_id"), primary_key=True)
     donor_id = Column(String(50), ForeignKey("Users.uni"), nullable=False)
+    is_used = Column(Boolean, default=False)  # New column to track if swipe is used
 
 class Transaction(Base):
     __tablename__ = "Transactions"
@@ -67,27 +82,27 @@ def get_db():
     finally:
         db.close()
 
-# Endpoints
 @app.post("/transactions", response_model=TransactionResponse)
 def create_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db)
 ):
-    # Verify that users exist
-    donor = db.query(User).filter(User.uni == transaction.donor_id).first()
-    recipient = db.query(User).filter(User.uni == transaction.recipient_id).first()
-    if not donor or not recipient:
-        raise HTTPException(status_code=404, detail="Donor or recipient not found")
-
-    # Verify that the swipe exists and belongs to the donor
-    swipe = db.query(SwipesToDonate).filter(
-        SwipesToDonate.swipe_id == transaction.swipe_id,
-        SwipesToDonate.donor_id == transaction.donor_id
-    ).first()
-    if not swipe:
-        raise HTTPException(status_code=404, detail="Swipe not found or doesn't belong to donor")
-
     try:
+        # Verify that users exist
+        donor = db.query(User).filter(User.uni == transaction.donor_id).first()
+        recipient = db.query(User).filter(User.uni == transaction.recipient_id).first()
+        if not donor or not recipient:
+            raise HTTPException(status_code=404, detail="Donor or recipient not found")
+
+        # Verify that the swipe exists, belongs to the donor, and hasn't been used
+        swipe = db.query(SwipesToDonate).filter(
+            SwipesToDonate.swipe_id == transaction.swipe_id,
+            SwipesToDonate.donor_id == transaction.donor_id,
+            SwipesToDonate.is_used == False
+        ).first()
+        if not swipe:
+            raise HTTPException(status_code=404, detail="Swipe not found, doesn't belong to donor, or has already been used")
+
         # Create the transaction
         db_transaction = Transaction(
             swipe_id=transaction.swipe_id,
@@ -102,48 +117,40 @@ def create_transaction(
         recipient.swipes_received += 1
         recipient.current_swipes += 1
 
-        # Remove the swipe from swipes_to_donate
-        db.delete(swipe)
+        # Mark the swipe as used instead of deleting it
+        swipe.is_used = True
 
         db.commit()
         db.refresh(db_transaction)
+        logger.info(f"Successfully created transaction: {db_transaction.transaction_id}")
         return db_transaction
+
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error creating transaction: {str(e)}")
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/transactions", response_model=List[TransactionResponse])
-def get_transactions(
-    donor_id: Optional[str] = None,
-    recipient_id: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    query = db.query(Transaction)
-    
-    if donor_id:
-        query = query.filter(Transaction.donor_id == donor_id)
-    if recipient_id:
-        query = query.filter(Transaction.recipient_id == recipient_id)
-        
-    return query.all()
-
-@app.get("/transactions/{transaction_id}", response_model=TransactionResponse)
-def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    transaction = db.query(Transaction).filter(Transaction.transaction_id == transaction_id).first()
-    if transaction is None:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return transaction
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/transactions/user/{uni}", response_model=List[TransactionResponse])
 def get_user_transactions(uni: str, db: Session = Depends(get_db)):
-    # Verify user exists
-    user = db.query(User).filter(User.uni == uni).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        # Verify user exists
+        user = db.query(User).filter(User.uni == uni).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        transactions = db.query(Transaction).filter(
+            (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
+        ).order_by(Transaction.transaction_date.desc()).all()
         
-    return db.query(Transaction).filter(
-        (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
-    ).all()
+        logger.info(f"Retrieved {len(transactions)} transactions for user: {uni}")
+        return transactions
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting transactions for user {uni}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
