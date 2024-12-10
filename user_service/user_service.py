@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from swipe_service.swipe_service import Swipe
 from base import Base
 
-
+app = FastAPI()
 
 # Add CORS middleware globally
 app.add_middleware(
