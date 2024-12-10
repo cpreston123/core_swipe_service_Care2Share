@@ -16,15 +16,15 @@ class User(Base):
   current_swipes = Column(Integer, default=0)
 
 class Swipe(Base):
-  __tablename__ = "User_Swipes"  
+  __tablename__ = "Swipes"  
   swipe_id = Column(Integer, primary_key=True, autoincrement=True)  
   uni = Column(String(50), ForeignKey("Users.uni", ondelete="CASCADE"), nullable=False) 
 
-class SwipeToDonate(Base):
-  __tablename__ = "Swipes_To_Donate" #"Swipes"
-  swipe_id = Column(Integer, primary_key=True, autoincrement=True)
-  donor_id = Column(String(50))
-  #created_date = Column(DateTime, default=datetime.utcnow)
+# class SwipeToDonate(Base):
+#   __tablename__ = "Swipes_To_Donate" #"Swipes"
+#   swipe_id = Column(Integer, primary_key=True, autoincrement=True)
+#   donor_id = Column(String(50))
+#   #created_date = Column(DateTime, default=datetime.utcnow)
 
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
 
@@ -40,7 +40,7 @@ def cleanup_database():
     try:
         logger.info("Dropping tables in the correct order...")
         # Drop dependent tables first
-        SwipeToDonate.__table__.drop(bind=engine, checkfirst=True)
+        # SwipeToDonate.__table__.drop(bind=engine, checkfirst=True)
         Swipe.__table__.drop(bind=engine, checkfirst=True)
         User.__table__.drop(bind=engine, checkfirst=True)
         logger.info("Tables dropped successfully.")
@@ -55,8 +55,8 @@ def initialize_database():
         User.__table__.create(bind=engine, checkfirst=True)  # Create Users table first
         logger.info("Creating Swipes table next...")
         Swipe.__table__.create(bind=engine, checkfirst=True)  # Create Swipes table after Users
-        logger.info("Creating Swipes_To_Donate table last...")
-        SwipeToDonate.__table__.create(bind=engine, checkfirst=True)  # Create Swipes_To_Donate last
+        # logger.info("Creating Swipes_To_Donate table last...")
+        # SwipeToDonate.__table__.create(bind=engine, checkfirst=True)  # Create Swipes_To_Donate last
         logger.info("Database initialized successfully!")
         print("Table details:")
         for table_name, table in Base.metadata.tables.items():

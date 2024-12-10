@@ -1,1 +1,1 @@
-from models.database import User, Swipe, SwipeToDonate
+from models.database import User, Swipe
