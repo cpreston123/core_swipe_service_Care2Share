@@ -1,12 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel
 import logging
-import random
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -28,48 +26,43 @@ except Exception as e:
 
 Base = declarative_base()
 
-# Database Models
+# Database Models - only what we need for transactions
 class User(Base):
     __tablename__ = "Users"
     uni = Column(String(50), primary_key=True)
     swipes_given = Column(Integer, default=0)
     swipes_received = Column(Integer, default=0)
-    points_given = Column(Integer, default=0)
-    points_received = Column(Integer, default=0)
-    current_points = Column(Integer, default=0)
-    current_swipes = Column(Integer, default=0)
+    current_swipes = Column(Integer, default=-1)
 
-class UserSwipes(Base):
-    __tablename__ = "User_Swipes"
+class Swipes(Base):
+    __tablename__ = "Swipes"
     swipe_id = Column(Integer, primary_key=True, autoincrement=True)
     uni = Column(String(50), ForeignKey("Users.uni"), nullable=False)
-
-class SwipesToDonate(Base):
-    __tablename__ = "Swipes_To_Donate"
-    swipe_id = Column(Integer, ForeignKey("User_Swipes.swipe_id"), primary_key=True)
-    donor_id = Column(String(50), ForeignKey("Users.uni"), nullable=False)
-    is_used = Column(Boolean, default=False)  # New column to track if swipe is used
+    is_donated = Column(Boolean, default=False)
 
 class Transaction(Base):
     __tablename__ = "Transactions"
     transaction_id = Column(Integer, primary_key=True, autoincrement=True)
-    swipe_id = Column(Integer, ForeignKey("Swipes_To_Donate.swipe_id"), nullable=False)
+    swipe_id = Column(Integer, ForeignKey("Swipes.swipe_id"), nullable=False)
     donor_id = Column(String(50), ForeignKey("Users.uni"), nullable=False)
     recipient_id = Column(String(50), ForeignKey("Users.uni"), nullable=False)
     transaction_date = Column(DateTime, default=datetime.utcnow)
 
-# Pydantic Models
-class TransactionCreate(BaseModel):
-    swipe_id: int
-    donor_id: str
-    recipient_id: str
-
+# Pydantic Models for response formatting
 class TransactionResponse(BaseModel):
     transaction_id: int
-    swipe_id: int
     donor_id: str
     recipient_id: str
     transaction_date: datetime
+
+    class Config:
+        orm_mode = True
+
+class UserTransactionSummary(BaseModel):
+    uni: str
+    swipes_given: int
+    swipes_received: int
+    recent_transactions: List[TransactionResponse]
 
     class Config:
         orm_mode = True
@@ -82,74 +75,48 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/transactions", response_model=TransactionResponse)
-def create_transaction(
-    transaction: TransactionCreate,
-    db: Session = Depends(get_db)
-):
-    try:
-        # Verify that users exist
-        donor = db.query(User).filter(User.uni == transaction.donor_id).first()
-        recipient = db.query(User).filter(User.uni == transaction.recipient_id).first()
-        if not donor or not recipient:
-            raise HTTPException(status_code=404, detail="Donor or recipient not found")
-
-        # Verify that the swipe exists, belongs to the donor, and hasn't been used
-        swipe = db.query(SwipesToDonate).filter(
-            SwipesToDonate.swipe_id == transaction.swipe_id,
-            SwipesToDonate.donor_id == transaction.donor_id,
-            SwipesToDonate.is_used == False
-        ).first()
-        if not swipe:
-            raise HTTPException(status_code=404, detail="Swipe not found, doesn't belong to donor, or has already been used")
-
-        # Create the transaction
-        db_transaction = Transaction(
-            swipe_id=transaction.swipe_id,
-            donor_id=transaction.donor_id,
-            recipient_id=transaction.recipient_id
-        )
-        db.add(db_transaction)
-
-        # Update user statistics
-        donor.swipes_given += 1
-        donor.current_swipes -= 1
-        recipient.swipes_received += 1
-        recipient.current_swipes += 1
-
-        # Mark the swipe as used instead of deleting it
-        swipe.is_used = True
-
-        db.commit()
-        db.refresh(db_transaction)
-        logger.info(f"Successfully created transaction: {db_transaction.transaction_id}")
-        return db_transaction
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating transaction: {str(e)}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/transactions/user/{uni}", response_model=List[TransactionResponse])
-def get_user_transactions(uni: str, db: Session = Depends(get_db)):
+@app.get("/transactions/history/{uni}", response_model=List[TransactionResponse])
+def get_user_transaction_history(uni: str, limit: int = 10, db: Session = Depends(get_db)):
+    """Get recent transaction history for a user (both donations and receipts)"""
     try:
         # Verify user exists
         user = db.query(User).filter(User.uni == uni).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
             
+        # Get recent transactions where user was either donor or recipient
         transactions = db.query(Transaction).filter(
             (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
-        ).order_by(Transaction.transaction_date.desc()).all()
+        ).order_by(Transaction.transaction_date.desc()).limit(limit).all()
         
-        logger.info(f"Retrieved {len(transactions)} transactions for user: {uni}")
+        logger.info(f"Retrieved {len(transactions)} recent transactions for user: {uni}")
         return transactions
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error getting transactions for user {uni}: {str(e)}")
+        logger.error(f"Error getting transaction history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/transactions/summary/{uni}", response_model=UserTransactionSummary)
+def get_user_transaction_summary(uni: str, db: Session = Depends(get_db)):
+    """Get user's transaction summary including total swipes given/received and recent transactions"""
+    try:
+        # Get user and their stats
+        user = db.query(User).filter(User.uni == uni).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get 5 most recent transactions
+        recent_transactions = db.query(Transaction).filter(
+            (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
+        ).order_by(Transaction.transaction_date.desc()).limit(5).all()
+
+        return UserTransactionSummary(
+            uni=user.uni,
+            swipes_given=user.swipes_given,
+            swipes_received=user.swipes_received,
+            recent_transactions=recent_transactions
+        )
+    except Exception as e:
+        logger.error(f"Error getting transaction summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
