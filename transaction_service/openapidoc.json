@@ -1,0 +1,229 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+      "title": "FastAPI",
+      "version": "0.1.0"
+    },
+    "paths": {
+      "/transactions/history/{uni}": {
+        "get": {
+          "summary": "Get User Transaction History",
+          "description": "Get recent transaction history for a user (both donations and receipts)",
+          "operationId": "get_user_transaction_history_transactions_history__uni__get",
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "uni",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Uni"
+              }
+            },
+            {
+              "name": "limit",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "integer",
+                "default": 10,
+                "title": "Limit"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/TransactionResponse"
+                    },
+                    "title": "Response Get User Transaction History Transactions History  Uni  Get"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/transactions/summary/{uni}": {
+        "get": {
+          "summary": "Get User Transaction Summary",
+          "description": "Get user's transaction summary including total swipes given/received and recent transactions",
+          "operationId": "get_user_transaction_summary_transactions_summary__uni__get",
+          "security": [
+            {
+              "HTTPBearer": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "uni",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Uni"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/UserTransactionSummary"
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "HTTPValidationError": {
+          "properties": {
+            "detail": {
+              "items": {
+                "$ref": "#/components/schemas/ValidationError"
+              },
+              "type": "array",
+              "title": "Detail"
+            }
+          },
+          "type": "object",
+          "title": "HTTPValidationError"
+        },
+        "TransactionResponse": {
+          "properties": {
+            "transaction_id": {
+              "type": "integer",
+              "title": "Transaction Id"
+            },
+            "donor_id": {
+              "type": "string",
+              "title": "Donor Id"
+            },
+            "recipient_id": {
+              "type": "string",
+              "title": "Recipient Id"
+            },
+            "transaction_date": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Transaction Date"
+            }
+          },
+          "type": "object",
+          "required": [
+            "transaction_id",
+            "donor_id",
+            "recipient_id",
+            "transaction_date"
+          ],
+          "title": "TransactionResponse"
+        },
+        "UserTransactionSummary": {
+          "properties": {
+            "uni": {
+              "type": "string",
+              "title": "Uni"
+            },
+            "swipes_given": {
+              "type": "integer",
+              "title": "Swipes Given"
+            },
+            "swipes_received": {
+              "type": "integer",
+              "title": "Swipes Received"
+            },
+            "recent_transactions": {
+              "items": {
+                "$ref": "#/components/schemas/TransactionResponse"
+              },
+              "type": "array",
+              "title": "Recent Transactions"
+            }
+          },
+          "type": "object",
+          "required": [
+            "uni",
+            "swipes_given",
+            "swipes_received",
+            "recent_transactions"
+          ],
+          "title": "UserTransactionSummary"
+        },
+        "ValidationError": {
+          "properties": {
+            "loc": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "array",
+              "title": "Location"
+            },
+            "msg": {
+              "type": "string",
+              "title": "Message"
+            },
+            "type": {
+              "type": "string",
+              "title": "Error Type"
+            }
+          },
+          "type": "object",
+          "required": [
+            "loc",
+            "msg",
+            "type"
+          ],
+          "title": "ValidationError"
+        }
+      },
+      "securitySchemes": {
+        "HTTPBearer": {
+          "type": "http",
+          "scheme": "bearer"
+        }
+      }
+    }
+  }
