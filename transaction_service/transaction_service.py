@@ -1,16 +1,60 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from datetime import datetime
 from typing import List
 from pydantic import BaseModel
 import logging
+import time
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom middleware for logging requests
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        logger.info(f"Path: {request.url.path} | Method: {request.method} | Time: {process_time:.4f}s")
+        return response
+
+# Custom middleware for error handling
+class ErrorHandlingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        try:
+            response = await call_next(request)
+            return response
+        except Exception as e:
+            logger.error(f"Global error handler caught: {str(e)}")
+            return HTTPException(status_code=500, detail="Internal server error")
+
+# Custom middleware for adding headers
+class HeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Service-Name"] = "transaction-service"
+        response.headers["X-Response-Time"] = str(time.time())
+        return response
+
 app = FastAPI()
+
+# Add all middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(HeaderMiddleware)
 
 # Database setup for AWS RDS MySQL with error handling
 try:
@@ -78,6 +122,7 @@ def get_db():
 @app.get("/transactions/history/{uni}", response_model=List[TransactionResponse])
 def get_user_transaction_history(uni: str, limit: int = 10, db: Session = Depends(get_db)):
     """Get recent transaction history for a user (both donations and receipts)"""
+    logger.info(f"Request received: /transactions/history/{uni} with limit={limit}")
     try:
         # Verify user exists
         user = db.query(User).filter(User.uni == uni).first()
@@ -100,8 +145,11 @@ def get_user_transaction_summary(uni: str, db: Session = Depends(get_db)):
     """Get user's transaction summary including total swipes given/received and recent transactions"""
     try:
         # Get user and their stats
+        logger.debug(f"Fetching user data for uni: {uni}")
         user = db.query(User).filter(User.uni == uni).first()
+        logger.debug(f"Fetched user: {user}")
         if not user:
+            logger.warning(f"Transaction summary request failed: User {uni} not found")
             raise HTTPException(status_code=404, detail="User not found")
 
         # Get 5 most recent transactions
