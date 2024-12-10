@@ -5,24 +5,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from swipe_service.swipe_service import Swipe
-from base import Base
+from models import User, Swipe
+from models.database import SessionLocal, initialize_database
 
-
-
-# Add CORS middleware globally
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+initialize_database()
 
 # Database setup
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
-engine = create_engine(DATABASE_URL, echo=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# engine = create_engine(DATABASE_URL, echo=True)
+# SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base = declarative_base()
 # FastAPI application
 app = FastAPI()
@@ -43,20 +34,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-# Database model
-class User(Base):
-    __tablename__ = "Users"
-    uni = Column(String(50), primary_key=True)
-    swipes_given = Column(Integer, default=0)
-    swipes_received = Column(Integer, default=0)
-    points_given = Column(Integer, default=0)
-    points_received = Column(Integer, default=0)
-    current_points = Column(Integer, default=0)
-    current_swipes = Column(Integer, default=0)
-
-Base.metadata.create_all(bind=engine)
-
 
 # Router for user-related endpoints
 user_router = APIRouter()
@@ -84,8 +61,7 @@ def create_user(uni: str, current_points: int = 0, current_swipes: int = 0, db: 
     try:
         swipe_records = [
             Swipe(
-                donor_id=uni,
-                created_date=datetime.utcnow()
+                uni=uni
             )
             for _ in range(current_swipes)
         ]

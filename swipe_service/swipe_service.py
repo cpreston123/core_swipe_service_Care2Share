@@ -7,10 +7,8 @@ from datetime import datetime
 import requests
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
-from datetime import datetime
-from base import Base  # Import the common Base
-
+from models import SwipeToDonate
+from models.database import SessionLocal
 
 app = FastAPI()
 
@@ -23,23 +21,7 @@ app.add_middleware(
 )
 
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-# Base = declarative_base()
 
-class Swipe(Base):
-    __tablename__ = "Swipes"  
-    swipe_id = Column(Integer, primary_key=True, autoincrement=True)  
-    donor_id = Column(String(50), ForeignKey("Users.uni", ondelete="CASCADE"), nullable=False) 
-    created_date = Column(DateTime, default=datetime.utcnow)  
-
-class SwipeToDonate(Base):
-    __tablename__ = "Swipes_To_Donate" #"Swipes"
-    swipe_id = Column(Integer, primary_key=True, autoincrement=True)
-    donor_id = Column(String(50))
-    #created_date = Column(DateTime, default=datetime.utcnow)
-
-Base.metadata.create_all(bind=engine)
 USER_SERVICE_URL = "http://localhost:8002"
 
 class DonateSwipeRequest(BaseModel):
