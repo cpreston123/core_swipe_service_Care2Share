@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -7,8 +7,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
+from math import ceil
 import logging
 import time
 import uuid
@@ -166,6 +167,30 @@ class TransactionResponse(BaseModel):
     donor_id: str
     recipient_id: str
     transaction_date: datetime
+    _links: dict = {
+        "self": "",
+        "donor": "",
+        "recipient": "",
+        "swipe": ""
+    }
+
+    class Config:
+        orm_mode = True
+
+class PaginationLinks(BaseModel):
+    self: str
+    first: str
+    last: Optional[str]
+    next: Optional[str]
+    prev: Optional[str]
+
+class PaginatedResponse(BaseModel):
+    items: List[TransactionResponse]
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    _links: PaginationLinks
 
     class Config:
         orm_mode = True
@@ -175,6 +200,11 @@ class UserTransactionSummary(BaseModel):
     swipes_given: int
     swipes_received: int
     recent_transactions: List[TransactionResponse]
+    _links: dict = {
+        "self": "",
+        "full_history": "",
+        "user_profile": ""
+    }
 
     class Config:
         orm_mode = True
@@ -187,14 +217,16 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/transactions/history/{uni}", response_model=List[TransactionResponse])
+@app.get("/transactions/history/{uni}", response_model=PaginatedResponse)
 def get_user_transaction_history(
-    uni: str, 
-    limit: int = 10, 
+    uni: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None
 ):
-    """Get recent transaction history for a user (both donations and receipts)"""
+    """Get paginated transaction history for a user (both donations and receipts)"""
     cor_id = correlation_id.get()
     try:
         # Verify user exists
@@ -203,43 +235,103 @@ def get_user_transaction_history(
             logger.warning(f"CorrelationID: {cor_id} | User not found: {uni}")
             raise HTTPException(status_code=404, detail="User not found")
             
-        # Get recent transactions where user was either donor or recipient
+        # Get total count for pagination
+        total_items = db.query(Transaction).filter(
+            (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
+        ).count()
+        
+        # Calculate pagination values
+        total_pages = ceil(total_items / page_size)
+        offset = (page - 1) * page_size
+        
+        # Get paginated transactions
         transactions = db.query(Transaction).filter(
             (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
-        ).order_by(Transaction.transaction_date.desc()).limit(limit).all()
+        ).order_by(Transaction.transaction_date.desc()
+        ).offset(offset).limit(page_size).all()
+
+        # Build base URL for pagination links
+        base_url = str(request.base_url)
+
+        # Add HATEOAS links to each transaction
+        transaction_responses = []
+        for tx in transactions:
+            tx_dict = vars(tx)
+            tx_dict['_links'] = {
+                "self": f"{base_url}transactions/{tx.transaction_id}",
+                "donor": f"{base_url}users/{tx.donor_id}",
+                "recipient": f"{base_url}users/{tx.recipient_id}",
+                "swipe": f"{base_url}swipes/{tx.swipe_id}"
+            }
+            transaction_responses.append(TransactionResponse(**tx_dict))
+
+        # Build pagination links
+        pagination_links = PaginationLinks(
+            self=f"{base_url}transactions/history/{uni}?page={page}&page_size={page_size}",
+            first=f"{base_url}transactions/history/{uni}?page=1&page_size={page_size}",
+            last=f"{base_url}transactions/history/{uni}?page={total_pages}&page_size={page_size}" if total_pages > 0 else None,
+            next=f"{base_url}transactions/history/{uni}?page={page+1}&page_size={page_size}" if page < total_pages else None,
+            prev=f"{base_url}transactions/history/{uni}?page={page-1}&page_size={page_size}" if page > 1 else None
+        )
+
+        logger.info(f"CorrelationID: {cor_id} | Retrieved page {page} of transactions for user: {uni}")
+        return PaginatedResponse(
+            items=transaction_responses,
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=total_pages,
+            _links=pagination_links
+        )
         
-        logger.info(f"CorrelationID: {cor_id} | Retrieved {len(transactions)} recent transactions for user: {uni}")
-        return transactions
     except Exception as e:
         logger.error(f"CorrelationID: {cor_id} | Error getting transaction history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/transactions/summary/{uni}", response_model=UserTransactionSummary)
 def get_user_transaction_summary(
-    uni: str, 
+    uni: str,
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None
 ):
     """Get user's transaction summary including total swipes given/received and recent transactions"""
     cor_id = correlation_id.get()
     try:
-        # Get user and their stats
         user = db.query(User).filter(User.uni == uni).first()
         if not user:
             logger.warning(f"CorrelationID: {cor_id} | User not found: {uni}")
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Get 5 most recent transactions
         recent_transactions = db.query(Transaction).filter(
             (Transaction.donor_id == uni) | (Transaction.recipient_id == uni)
         ).order_by(Transaction.transaction_date.desc()).limit(5).all()
+
+        base_url = str(request.base_url)
+        
+        # Add HATEOAS links to transactions
+        transaction_responses = []
+        for tx in recent_transactions:
+            tx_dict = vars(tx)
+            tx_dict['_links'] = {
+                "self": f"{base_url}transactions/{tx.transaction_id}",
+                "donor": f"{base_url}users/{tx.donor_id}",
+                "recipient": f"{base_url}users/{tx.recipient_id}",
+                "swipe": f"{base_url}swipes/{tx.swipe_id}"
+            }
+            transaction_responses.append(TransactionResponse(**tx_dict))
 
         logger.info(f"CorrelationID: {cor_id} | Retrieved summary for user: {uni}")
         return UserTransactionSummary(
             uni=user.uni,
             swipes_given=user.swipes_given,
             swipes_received=user.swipes_received,
-            recent_transactions=recent_transactions
+            recent_transactions=transaction_responses,
+            _links={
+                "self": f"{base_url}transactions/summary/{uni}",
+                "full_history": f"{base_url}transactions/history/{uni}",
+                "user_profile": f"{base_url}users/{uni}"
+            }
         )
     except Exception as e:
         logger.error(f"CorrelationID: {cor_id} | Error getting transaction summary: {str(e)}")
