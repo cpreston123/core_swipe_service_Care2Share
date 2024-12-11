@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from fastapi import FastAPI, HTTPException, APIRouter, Depends
 from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.ext.declarative import declarative_base
@@ -39,8 +40,9 @@ def get_db():
 user_router = APIRouter()
 
 # Define a Pydantic model for the request body
-class UpdateSwipesRequest(BaseModel):
-    current_swipes: int
+class UpdateUserAttributesRequest(BaseModel):
+    current_swipes: Optional[int] = None  # Optional field with default None
+    points: Optional[int] = None 
 
 @app.get("/debug/routes")
 def debug_routes():
@@ -77,7 +79,6 @@ def create_user(uni: str, current_points: int = 0, current_swipes: int = 0, db: 
     return {"message": "User created successfully"}
 
   
- 
 class UserSchema(BaseModel):
     uni: str
     current_points: int = 0
@@ -110,7 +111,6 @@ def login_or_create_user(user: UserSchema):
     finally:
         db.close()
 
-        
 
 @user_router.get("/users/{uni}")
 def get_user(uni: str, db: Session = Depends(get_db)):
@@ -119,38 +119,94 @@ def get_user(uni: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-
-# to account for both setting and incrementing/decrementing, is_relative
 @user_router.put("/users/{uni}")
-def update_user_swipes(
+def update_user_attributes(
     uni: str, 
-    request: UpdateSwipesRequest, 
+    request: UpdateUserAttributesRequest, 
     db: Session = Depends(get_db), 
-    is_relative: bool = False  # Optional query parameter to decide mode
+    is_relative: bool = False
 ):
     user = db.query(User).filter(User.uni == uni).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if is_relative:
-        if request.current_swipes < 0 and abs(request.current_swipes) > user.current_swipes:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Cannot decrement {abs(request.current_swipes)} swipes. User {uni} has only {user.current_swipes} swipes available."
-            )
-        user.current_swipes += request.current_swipes
-        if request.current_swipes < 0:
-            user.swipes_given += abs(request.current_swipes)
-    else:
-        # Handle absolute assignment
-        if request.current_swipes < 0:
-            raise HTTPException(status_code=400, detail="Swipe count cannot be negative")
-        user.current_swipes = request.current_swipes
+    # Update swipes
+    if request.current_swipes is not None:
+        if is_relative:
+            if request.current_swipes < 0 and abs(request.current_swipes) > user.current_swipes:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Cannot decrement {abs(request.current_swipes)} swipes. User {uni} has only {user.current_swipes} swipes available."
+                )
+            user.current_swipes += request.current_swipes
+            if request.current_swipes < 0:
+                user.swipes_given += abs(request.current_swipes)
+        else:
+            if request.current_swipes < 0:
+                raise HTTPException(status_code=400, detail="Swipe count cannot be negative")
+            user.current_swipes = request.current_swipes
+
+    # Update points
+    if request.points is not None:
+        if is_relative:
+            if request.points < 0 and abs(request.points) > user.current_points:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot decrement {abs(request.points)} points. User {uni} has only {user.current_points} points available."
+                )
+            user.current_points += request.points
+            if request.points < 0:
+                user.points_given += abs(request.points)
+        else:
+            if request.points < 0:
+                raise HTTPException(status_code=400, detail="Points count cannot be negative")
+            user.current_points = request.points
 
     db.commit()
     return {
-        "message": f"Updated swipes for {uni}: current_swipes={user.current_swipes}, swipes_given={user.swipes_given}"
+        "message": f"Updated attributes for {uni}: current_swipes={user.current_swipes}, swipes_given={user.swipes_given}, current_points={user.current_points}, points_given={user.points_given}"
     }
+
+
+# # to account for both setting and incrementing/decrementing, is_relative
+# @user_router.put("/users/{uni}")
+# def update_user_attributes(
+#     uni: str, 
+#     request: UpdateUserAttributesRequest, 
+#     db: Session = Depends(get_db), 
+#     is_relative: bool = False  # Optional query parameter to decide mode
+# ):
+#     user = db.query(User).filter(User.uni == uni).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     if request.current_swipes:
+#         if is_relative:
+#             if request.current_swipes < 0 and abs(request.current_swipes) > user.current_swipes:
+#                 raise HTTPException(
+#                     status_code=400, 
+#                     detail=f"Cannot decrement {abs(request.current_swipes)} swipes. User {uni} has only {user.current_swipes} swipes available."
+#                 )
+#             user.current_swipes += request.current_swipes
+#             if request.current_swipes < 0:
+#                 user.swipes_given += abs(request.current_swipes)
+#         else:
+#             # Handle absolute assignment
+#             if request.current_swipes < 0:
+#                 raise HTTPException(status_code=400, detail="Swipe count cannot be negative")
+#             user.current_swipes = request.current_swipes
+#     if request.points: 
+#         if request.points < 0 and abs(request.points) > user.current_points:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail=f"Cannot decrement {abs(request.points)} points. User {uni} has only {user.current_points} points available."
+#              )
+#         else:
+#             user.current_points += request.points
+#     db.commit()
+#     return {
+#         "message": f"Updated attributes for {uni}: current_swipes={user.current_swipes}, swipes_given={user.swipes_given}, current_points = {user.current_points}, points_given = {user.points_given}"
+#     }
 # Include the user router in the FastAPI app
 app.include_router(user_router, prefix="", tags=["Users"])
 
