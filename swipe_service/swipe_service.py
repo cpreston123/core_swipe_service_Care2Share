@@ -2,9 +2,17 @@ from fastapi import FastAPI, HTTPException, Query
 from more_itertools import consume
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime
 import requests
+import os
+import json
+import base64
+from email.mime.text import MIMEText
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from models import Swipe, User, Transaction, Points
@@ -41,6 +49,44 @@ class ReceivePointsRequest(BaseModel):
     recipient_id: str
     points: int
 
+# OAuth 2.0 Configuration
+SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "credentials.json")
+TOKEN_FILE = "token.json"
+
+def get_gmail_service():
+    """Authenticate using OAuth 2.0 and return Gmail API service."""
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "r") as token:
+            creds_data = json.load(token)
+            creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        with open(TOKEN_FILE, "w") as token:
+            token.write(creds.to_json())
+
+    return build("gmail", "v1", credentials=creds)
+
+def send_email(to, subject, message_text):
+    """Send an email using Gmail API."""
+    try:
+        service = get_gmail_service()
+        message = MIMEText(message_text)
+        message["to"] = to
+        message["subject"] = subject
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        body = {"raw": raw_message}
+        service.users().messages().send(userId="me", body=body).execute()
+    except Exception as e:
+        print(f"Error sending email: {e}")
+
 @app.post("/swipes/donate")
 def donate_swipe(request: DonateSwipeRequest):
     donor_id = request.donor_id
@@ -76,6 +122,11 @@ def donate_swipe(request: DonateSwipeRequest):
     )
     if update_response.status_code != 200:
         raise HTTPException(status_code=500, detail="Failed to update swipe count")
+    
+    # Send email notification
+    subject = "Thank You for Donating Swipes!"
+    message_text = f"Hi {donor_id},\n\nThank you for donating {swipes} swipe(s). Your generosity is greatly appreciated!"
+    send_email(donor["uni"], subject, message_text)
 
     return {"message": f"{swipes} swipe(s) donated successfully"}
 
@@ -122,6 +173,10 @@ def claim_swipe(request: ReceiveSwipeRequest):
             print(donor_update_response, recipient_update_response)
             if donor_update_response.status_code != 200 or recipient_update_response.status_code != 200:
                 raise HTTPException(status_code=500, detail="Failed to update donor or recipient statuses")
+            
+        subject = "Swipe Claim Successful!"
+        message_text = f"Hi {recipient_id},\n\nYou have successfully claimed {swipes_to_claim} swipe(s). Enjoy your meal!"
+        send_email(recipient.uni, subject, message_text)
 
         return {"message": "Swipe claimed successfully", "swipe_id": swipe_id}
 
