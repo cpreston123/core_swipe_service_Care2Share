@@ -37,6 +37,10 @@ class ReceiveSwipeRequest(BaseModel):
     recipient_id: str
     swipes_to_claim: int
 
+class ReceivePointsRequest(BaseModel):
+    recipient_id: str
+    points: int
+
 @app.post("/swipes/donate")
 def donate_swipe(request: DonateSwipeRequest):
     donor_id = request.donor_id
@@ -156,29 +160,30 @@ def donate_points(request: DonatePointsRequest):
     return {"message": f"{points_to_donate} point(s) donated successfully"}
 
 @app.post("/points/claim")
-def claim_points(recipient_id: str, points: int):
+def claim_points(request: ReceivePointsRequest):
     with SessionLocal() as db:
-        recipient = db.query(User).filter(User.uni == recipient_id).first()
+        recipient = db.query(User).filter(User.uni == request.recipient_id).first()
         if not recipient:
             raise HTTPException(status_code=404, detail="Recipient not found")
 
         points_row = db.query(Points).first()
-        if not points_row or points_row.points < points:
+        if not points_row or points_row.points < request.points:
             raise HTTPException(status_code=400, detail="Not enough points available to claim")
 
-        points_row.points -= points
+        recipient.points_received += request.points
+        points_row.points -= request.points
         db.commit()  # Save changes to the global points table
 
     update_response = requests.put(
-        f"http://localhost:8001/users/{recipient_id}",
-        json={"points": points, "points_received": points},
+        f"http://localhost:8001/users/{request.recipient_id}",
+        json={"points": request.points, "points_received": request.points},
         params={"is_relative": "true"}  # Indicate this is a relative update
     )
 
     if update_response.status_code != 200:
         raise HTTPException(status_code=500, detail="Failed to update recipient's points")
 
-    return {"message": f"{points} point(s) claimed successfully"}
+    return {"message": f"{request.points} point(s) claimed successfully"}
 
 if __name__ == "__main__":
     import uvicorn
