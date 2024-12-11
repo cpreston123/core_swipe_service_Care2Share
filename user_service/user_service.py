@@ -1,4 +1,6 @@
 import asyncio
+from ariadne import QueryType, make_executable_schema, graphql_sync
+from ariadne.asgi import GraphQL
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, APIRouter, Depends, WebSocket
 from typing import Optional
@@ -18,9 +20,7 @@ initialize_database()
 
 # Database setup
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
-# engine = create_engine(DATABASE_URL, echo=True)
-# SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-# Base = declarative_base()
+
 # FastAPI application
 app = FastAPI()
 
@@ -32,6 +32,62 @@ app.add_middleware(
     allow_methods=["*"],  
     allow_headers=["*"],  
 )
+
+# GRAPHQL ENDPOINT IMPLEMENTATION -- READ ONLY
+# Accessible through http://localhost:8001/graphql
+
+# ----------------------------------------------
+# Type Definitions
+# ----------------------------------------------
+type_defs = """
+    type Query {
+        users: [User]
+        swipes: [Swipe]
+    }
+
+    type User {
+        uni: String
+        swipes_given: Int
+        swipes_received: Int
+        points_given: Int
+        points_received: Int
+        current_points: Int
+        current_swipes: Int
+    }
+
+    type Swipe {
+        swipe_id: Int
+        uni: String
+        is_donated: Boolean
+    }
+"""
+
+# ----------------------------------------------
+# Resolvers for queries
+# ----------------------------------------------
+query = QueryType()
+
+@query.field("users")
+def resolve_users(_, info):
+    db = SessionLocal()
+    users = db.query(User).all()
+    db.close()
+    return users
+
+@query.field("swipes")
+def resolve_swipes(_, info):
+    db = SessionLocal()
+    swipes = db.query(Swipe).all()
+    db.close()
+    return swipes
+
+# ----------------------------------------------
+# Create Executable Schema And Endpoint
+# ----------------------------------------------
+schema = make_executable_schema(type_defs, query)
+app.add_route("/graphql", GraphQL(schema=schema))
+
+# END OF GRAPHQL IMPLEMENTATION
 
 # Dependency for database session
 def get_db():
