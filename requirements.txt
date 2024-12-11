@@ -41,6 +41,6 @@ starlette==0.38.4
 typing_extensions==4.12.2
 uritemplate==4.1.1
 urllib3==2.2.3
-uvicorn==0.30.6
-
-
+uvicorn==0.32.1
+ariadne==0.23.0
+websockets==14.1
