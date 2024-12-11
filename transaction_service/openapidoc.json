@@ -8,7 +8,7 @@
       "/transactions/history/{uni}": {
         "get": {
           "summary": "Get User Transaction History",
-          "description": "Get recent transaction history for a user (both donations and receipts)",
+          "description": "Get paginated transaction history for a user (both donations and receipts)",
           "operationId": "get_user_transaction_history_transactions_history__uni__get",
           "security": [
             {
@@ -26,13 +26,26 @@
               }
             },
             {
-              "name": "limit",
+              "name": "page",
               "in": "query",
               "required": false,
               "schema": {
                 "type": "integer",
+                "minimum": 1,
+                "default": 1,
+                "title": "Page"
+              }
+            },
+            {
+              "name": "page_size",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "integer",
+                "maximum": 100,
+                "minimum": 1,
                 "default": 10,
-                "title": "Limit"
+                "title": "Page Size"
               }
             }
           ],
@@ -42,11 +55,7 @@
               "content": {
                 "application/json": {
                   "schema": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/TransactionResponse"
-                    },
-                    "title": "Response Get User Transaction History Transactions History  Uni  Get"
+                    "$ref": "#/components/schemas/PaginatedResponse"
                   }
                 }
               }
@@ -124,6 +133,42 @@
           },
           "type": "object",
           "title": "HTTPValidationError"
+        },
+        "PaginatedResponse": {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/TransactionResponse"
+              },
+              "type": "array",
+              "title": "Items"
+            },
+            "page": {
+              "type": "integer",
+              "title": "Page"
+            },
+            "page_size": {
+              "type": "integer",
+              "title": "Page Size"
+            },
+            "total_items": {
+              "type": "integer",
+              "title": "Total Items"
+            },
+            "total_pages": {
+              "type": "integer",
+              "title": "Total Pages"
+            }
+          },
+          "type": "object",
+          "required": [
+            "items",
+            "page",
+            "page_size",
+            "total_items",
+            "total_pages"
+          ],
+          "title": "PaginatedResponse"
         },
         "TransactionResponse": {
           "properties": {
