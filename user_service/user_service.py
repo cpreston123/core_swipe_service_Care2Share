@@ -194,47 +194,6 @@ def update_user_attributes(
         "message": f"Updated attributes for {uni}: current_swipes={user.current_swipes}, swipes_given={user.swipes_given}, current_points={user.current_points}, points_given={user.points_given}"
     }
 
-
-# # to account for both setting and incrementing/decrementing, is_relative
-# @user_router.put("/users/{uni}")
-# def update_user_attributes(
-#     uni: str, 
-#     request: UpdateUserAttributesRequest, 
-#     db: Session = Depends(get_db), 
-#     is_relative: bool = False  # Optional query parameter to decide mode
-# ):
-#     user = db.query(User).filter(User.uni == uni).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     if request.current_swipes:
-#         if is_relative:
-#             if request.current_swipes < 0 and abs(request.current_swipes) > user.current_swipes:
-#                 raise HTTPException(
-#                     status_code=400, 
-#                     detail=f"Cannot decrement {abs(request.current_swipes)} swipes. User {uni} has only {user.current_swipes} swipes available."
-#                 )
-#             user.current_swipes += request.current_swipes
-#             if request.current_swipes < 0:
-#                 user.swipes_given += abs(request.current_swipes)
-#         else:
-#             # Handle absolute assignment
-#             if request.current_swipes < 0:
-#                 raise HTTPException(status_code=400, detail="Swipe count cannot be negative")
-#             user.current_swipes = request.current_swipes
-#     if request.points: 
-#         if request.points < 0 and abs(request.points) > user.current_points:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail=f"Cannot decrement {abs(request.points)} points. User {uni} has only {user.current_points} points available."
-#              )
-#         else:
-#             user.current_points += request.points
-#     db.commit()
-#     return {
-#         "message": f"Updated attributes for {uni}: current_swipes={user.current_swipes}, swipes_given={user.swipes_given}, current_points = {user.current_points}, points_given = {user.points_given}"
-#     }
-# Include the user router in the FastAPI app
 app.include_router(user_router, prefix="", tags=["Users"])
 
 @app.get("/")
