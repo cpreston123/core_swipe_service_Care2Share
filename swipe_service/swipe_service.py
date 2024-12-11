@@ -33,10 +33,15 @@ class DonatePointsRequest(BaseModel):
     donor_id: str
     points: int
 
+class ReceiveSwipeRequest(BaseModel):
+    recipient_id: str
+    swipes_to_claim: int
+
 @app.post("/swipes/donate")
 def donate_swipe(request: DonateSwipeRequest):
     donor_id = request.donor_id
     swipes = request.current_swipes  
+    print(donor_id, swipes)
 
     response = requests.get(f"http://localhost:8001/users/{donor_id}")
     if response.status_code != 200:
@@ -71,41 +76,48 @@ def donate_swipe(request: DonateSwipeRequest):
     return {"message": f"{swipes} swipe(s) donated successfully"}
 
 @app.post("/swipes/claim")
-def claim_swipe(recipient_id: str):
+def claim_swipe(request: ReceiveSwipeRequest):
+    recipient_id = request.recipient_id
+    swipes_to_claim = request.swipes_to_claim 
     with SessionLocal() as db:
-        swipe = db.query(Swipe).filter(Swipe.is_donated == True).first()
-        if not swipe:
+        donated_swipes = db.query(Swipe).filter(Swipe.is_donated == True).all()
+        if len(donated_swipes) < swipes_to_claim:
             raise HTTPException(status_code=400, detail="No swipes available to claim")
 
-        swipe_id = swipe.swipe_id
-        recipient = db.query(User).filter(User.uni == recipient_id).first()
-        if not recipient:
-            raise HTTPException(status_code=404, detail="Recipient not found")
+        for i in range(swipes_to_claim):
+            swipe = donated_swipes[i]
+            swipe_id = swipe.swipe_id
+            print(swipe_id)
+            recipient = db.query(User).filter(User.uni == recipient_id).first()
+            if not recipient:
+                raise HTTPException(status_code=404, detail="Recipient not found")
 
-        donor_id = swipe.uni
-        swipe.is_donated = False
-        swipe.uni = recipient_id
-        transaction = Transaction(
-            swipe_id=swipe_id,
-            donor_id=donor_id,
-            recipient_id=recipient_id,
-            transaction_date=datetime.utcnow()
-        )
-        db.add(transaction)
-        db.commit()
-        donor_update_response = requests.put(
-            f"http://localhost:8001/users/{donor_id}",
-            json={"swipes_given": 1},
-            params={"is_relative": "true"}
-        )
-        recipient_update_response = requests.put(
-            f"http://localhost:8001/users/{recipient_id}",
-            json={"current_swipes": 1, "swipes_received": 1},
-            params={"is_relative": "true"}
-        )
-        print(donor_update_response, recipient_update_response)
-        if donor_update_response.status_code != 200 or recipient_update_response.status_code != 200:
-            raise HTTPException(status_code=500, detail="Failed to update donor or recipient statuses")
+            donor_id = swipe.uni
+            swipe.is_donated = False
+            swipe.uni = recipient_id
+            recipient.swipes_received += 1
+            transaction = Transaction(
+                swipe_id=swipe_id,
+                donor_id=donor_id,
+                recipient_id=recipient_id,
+                transaction_date=datetime.utcnow()
+            )
+            print(swipe)
+            db.add(transaction)
+            db.commit()
+            donor_update_response = requests.put(
+                f"http://localhost:8001/users/{donor_id}",
+                json={"swipes_given": 1},
+                params={"is_relative": "true"}
+            )
+            recipient_update_response = requests.put(
+                f"http://localhost:8001/users/{recipient_id}",
+                json={"current_swipes": 1, "swipes_received": 1},
+                params={"is_relative": "true"}
+            )
+            print(donor_update_response, recipient_update_response)
+            if donor_update_response.status_code != 200 or recipient_update_response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to update donor or recipient statuses")
 
         return {"message": "Swipe claimed successfully", "swipe_id": swipe_id}
 
