@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateT
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from sqlalchemy.ext.declarative import declarative_base
+from decouple import config
 
 Base = declarative_base()
 
@@ -12,8 +13,8 @@ class User(Base):
   swipes_received = Column(Integer, default=0)
   points_given = Column(Integer, default=0)
   points_received = Column(Integer, default=0)
-  current_points = Column(Integer, default=0)
-  current_swipes = Column(Integer, default=0)
+  current_points = Column(Integer, default=-1)
+  current_swipes = Column(Integer, default=-1)
 
 class Swipe(Base):
   __tablename__ = "Swipes"  
@@ -34,9 +35,11 @@ class Points(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     points = Column(Integer, default=0, nullable=False)  
 
-DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
+# Database setup
+DATABASE_URL = config("DATABASE_URL")
+engine = create_engine(DATABASE_URL, echo=True)  # Set echo=True to debug queries
+# DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
 
-engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 import logging
