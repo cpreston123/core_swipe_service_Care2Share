@@ -1,6 +1,7 @@
+import asyncio
 from datetime import datetime
+from fastapi import FastAPI, HTTPException, APIRouter, Depends, WebSocket
 from typing import Optional
-from fastapi import FastAPI, HTTPException, APIRouter, Depends
 from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -8,6 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from models import User, Swipe
 from models.database import SessionLocal, initialize_database
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 initialize_database()
 
@@ -43,6 +48,28 @@ user_router = APIRouter()
 class UpdateUserAttributesRequest(BaseModel):
     current_swipes: Optional[int] = None  # Optional field with default None
     points: Optional[int] = None 
+
+@app.websocket("/ws/{uni}")
+async def websocket_endpoint(uni: str, websocket: WebSocket, db: Session = Depends(get_db)):
+    await websocket.accept()
+    while True:
+        with SessionLocal() as fresh_session:
+            user = fresh_session.query(User).filter(User.uni == uni).first()
+            if user:
+                data_json = {
+                    "points_received": user.points_received,
+                    "points_given": user.points_given,
+                    "swipes_received": user.swipes_received,
+                    "current_swipes": user.current_swipes,
+                    "swipes_given": user.swipes_given,
+                    "uni": user.uni,
+                    "current_points": user.current_points,
+                }
+                await websocket.send_json(data_json)
+            else:
+                await websocket.send_json({"error": "User not found"})
+                break
+        await asyncio.sleep(1)
 
 @app.get("/debug/routes")
 def debug_routes():
