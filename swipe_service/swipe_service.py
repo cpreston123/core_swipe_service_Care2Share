@@ -178,7 +178,7 @@ def claim_swipe(request: ReceiveSwipeRequest):
         message_text = f"Hi {recipient_id},\n\nYou have successfully claimed {swipes_to_claim} swipe(s). Enjoy your meal!"
         send_email(recipient.uni, subject, message_text)
 
-        return {"message": "Swipe claimed successfully", "swipe_id": swipe_id}
+        return {"message": f"{swipes_to_claim} swipe(s) claimed successfully", "swipe_id": swipe_id}
 
 @app.post("/points/donate")
 def donate_points(request: DonatePointsRequest):
