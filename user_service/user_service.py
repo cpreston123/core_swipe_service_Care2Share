@@ -1,7 +1,8 @@
+
 import asyncio
 from ariadne import QueryType, make_executable_schema, graphql_sync
 from ariadne.asgi import GraphQL
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 import logging
 import os
 import uuid
@@ -26,11 +27,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
-from starlette.requests import Request  
 from email.mime.text import MIMEText
-
-import jwt
-from jwt import PyJWTError
 
 import contextvars
 from decouple import config
@@ -59,50 +56,42 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
         response.headers['X-Correlation-ID'] = cor_id
         return response
 
-SECRET_KEY = config("SECRET_KEY")  # Your application's secret key
-ALGORITHM = "HS256"  # JWT signing algorithm
-
 # Authorization Middleware
 class AuthorizationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         cor_id = correlation_id.get()
         logger.info(f"CorrelationID: {cor_id} | Headers: {dict(request.headers)}")
 
-        # Public paths that don't require authentication
-        public_paths = ["/", "/docs", "/openapi.json", "/login", "/admin/users", "/admin/update-user"] # DELETE LAST PATH, USED FOR TESTING PURPOSES
         
-        if request.url.path not in public_paths:
-            auth_header = request.headers.get('Authorization')
-            if not auth_header:
-                logger.warning(f"CorrelationID: {cor_id} | Missing Authorization header for path: {request.url.path}")
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Authorization header is missing"}
-                )
-            
-            try:
-                # Validate Authorization header format
-                scheme, token = auth_header.split()
-                if scheme.lower() != 'bearer':
-                    logger.warning(f"CorrelationID: {cor_id} | Invalid authorization scheme")
-                    return JSONResponse(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        content={"detail": "Invalid authorization scheme"}
-                    )
+        # List of public paths that don't require authorization
+        # public_paths = ["/", "/docs", "/openapi.json", "/login", "/admin/users", "/admin/update-user"]
+        
+        # if request.url.path not in public_paths:
+        #     auth_header = request.headers.get('Authorization')
+        #     if not auth_header:
+        #         logger.warning(f"CorrelationID: {cor_id} | Missing Authorization header for path: {request.url.path}")
+        #         return JSONResponse(
+        #             status_code=401,
+        #             content={"detail": "Authorization header is missing"}
+        #             )
                 
-                # Decode and verify JWT token
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                request.state.user = payload  # Store user info in the request state
-                logger.info(f"CorrelationID: {cor_id} | User authenticated: {payload.get('sub')}")
-            except (PyJWTError, ValueError) as e:
-                logger.warning(f"CorrelationID: {cor_id} | Token validation error: {str(e)}")
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Invalid or expired token"}
-                )
-
+        #     try:
+        #         scheme, token = auth_header.split()
+        #         if scheme.lower() != 'bearer' or not token:
+        #             logger.warning(f"CorrelationID: {cor_id} | Invalid authorization scheme or missing token")
+        #             return JSONResponse(
+        #                 status_code=401,
+        #                 content={"detail": "Invalid or missing authorization token"}
+        #             )
+        #     except ValueError:
+        #         logger.warning(f"CorrelationID: {cor_id} | Malformed Authorization header")
+        #         return JSONResponse(
+        #             status_code=401,
+        #             content={"detail": "Malformed Authorization header"}
+        #             )
         response = await call_next(request)
         return response
+        
 
 # Logging Middleware
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -173,14 +162,6 @@ def send_email(to, subject, message_text):
         print(f"Email sent to {to}")
     except Exception as e:
         print(f"Error sending email: {e}")
-
-# Create access token 
-def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=15)):
-    """Generate a JWT token."""
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + expires_delta
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # Add CORS middleware globally
 # Add middleware
@@ -338,7 +319,7 @@ class UpdateUserSchema(BaseModel):
     field: str  # 'current_points' or 'current_swipes'
     value: int
 
-@user_router.post("/login", status_code=200, response_model=None)
+@user_router.post("/login", status_code=200)
 def login_or_create_user(user: UserSchema, response: Response):
     db = SessionLocal()
     cor_id = correlation_id.get()
@@ -346,16 +327,8 @@ def login_or_create_user(user: UserSchema, response: Response):
         # Check if user exists
         existing_user = db.query(User).filter(User.uni == user.uni).first()
         if existing_user:
-            token_data = {"sub": existing_user.uni}
-            access_token = create_access_token(data=token_data)
-
             logger.info(f"CorrelationID: {cor_id} | User logged in: {user.uni}")
-            user_data = {
-                "uni": existing_user.uni,
-                "current_points": existing_user.current_points,
-                "current_swipes": existing_user.current_swipes,
-            }
-            return {"message": "User exists", "user": user_data, "access_token": access_token}
+            return {"message": "User exists", "user": existing_user}
         
         # Create new user if not found
         new_user = User(
@@ -366,10 +339,6 @@ def login_or_create_user(user: UserSchema, response: Response):
         db.add(new_user)
         logger.info(f"CorrelationID: {cor_id} | New user created: {user.uni}")
         db.commit()
-
-        # Generate JWT token 
-        token_data = {"sub": user.uni}
-        access_token = create_access_token(data=token_data)
 
         # Send welcome email
         subject = "Welcome to Care2Share!"
@@ -385,39 +354,13 @@ def login_or_create_user(user: UserSchema, response: Response):
 
         # Add the Link header with the URL of the newly created user resource
         response.headers["Link"] = f"<{user_url}>; rel='self'"
-
-        user_data = {
-            "uni": new_user.uni,
-            "current_points": new_user.current_points,
-            "current_swipes": new_user.current_swipes,
-        }
-
-        return {"message": "New user created", "user": user_data, "access_token": access_token}
+        return {"message": "New user created", "user": new_user}
     except Exception as e:
         db.rollback()
         logger.error(f"CorrelationID: {cor_id} | Error during login: {str(e)}")
         raise HTTPException(status_code=500, detail="Error processing request")
     finally:
         db.close()
-
-# Access authenticated user's data from request.state.user attribute set by middleware
-@user_router.get("/users/me")
-def get_current_user(request: Request):
-    user = request.state.user
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    if isinstance(user, dict):
-            user_data = user
-    else:
-        user_data = {
-            "uni": user.uni,
-            "current_points": user.current_points,
-            "current_swipes": user.current_swipes,
-    }
-    return {"message": "Authenticated user", "user": user_data}
-
 
 @user_router.get("/users/{uni}")
 def get_user(uni: str):
