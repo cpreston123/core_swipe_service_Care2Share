@@ -19,24 +19,31 @@ from email.mime.text import MIMEText
 from pydantic import BaseModel
 from models import User, Swipe
 from models.database import SessionLocal, initialize_database
+from decouple import config
 
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
+
+
+# Secret key and algorithm for token encoding/decoding
+SECRET_KEY = "your-secret-key"  
+ALGORITHM = "HS256"
+
+# Function to create an access token
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"], 
-    allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
-)
-
 # Create context for correlation ID
 correlation_id = contextvars.ContextVar('correlation_id', default=None)
+
 
 # Correlation ID Middleware
 class CorrelationIDMiddleware(BaseHTTPMiddleware):
@@ -56,33 +63,20 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
 
         
         # List of public paths that don't require authorization
-        # public_paths = ["/", "/docs", "/openapi.json", "/login", "/admin/users", "/admin/update-user"]
-        
-        # if request.url.path not in public_paths:
-        #     auth_header = request.headers.get('Authorization')
-        #     if not auth_header:
-        #         logger.warning(f"CorrelationID: {cor_id} | Missing Authorization header for path: {request.url.path}")
-        #         return JSONResponse(
-        #             status_code=401,
-        #             content={"detail": "Authorization header is missing"}
-        #             )
-                
-        #     try:
-        #         scheme, token = auth_header.split()
-        #         if scheme.lower() != 'bearer' or not token:
-        #             logger.warning(f"CorrelationID: {cor_id} | Invalid authorization scheme or missing token")
-        #             return JSONResponse(
-        #                 status_code=401,
-        #                 content={"detail": "Invalid or missing authorization token"}
-        #             )
-        #     except ValueError:
-        #         logger.warning(f"CorrelationID: {cor_id} | Malformed Authorization header")
-        #         return JSONResponse(
-        #             status_code=401,
-        #             content={"detail": "Malformed Authorization header"}
-        #             )
-        response = await call_next(request)
-        return response
+        public_paths = ["/", "/docs", "/openapi.json", "/admin/login"]
+        if request.url.path not in public_paths:
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith("Bearer "):
+                return JSONResponse(status_code=401, content={"detail": "Authorization token is missing or invalid"})
+
+            token = auth_header.split(" ")[1]
+            try:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                request.state.user = payload  # Store user info in request state
+            except JWTError:
+                return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        return await call_next(request)
+
         
 
 # Logging Middleware
@@ -95,11 +89,24 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         logger.info(f"CorrelationID: {cor_id} | Path: {request.url.path} | Method: {request.method} | Time: {process_time:.4f}s")
         return response
     
-DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
+DATABASE_URL = config("DATABASE_URL")
 
 initialize_database()
 
 USER_SERVICE_URL = "http://localhost:8004"
+
+app = FastAPI()
+
+app.add_middleware(CorrelationIDMiddleware)
+app.add_middleware(AuthorizationMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"], 
+    allow_credentials=True,
+    allow_methods=["*"],  
+    allow_headers=["*"],  
+)
+app.add_middleware(LoggingMiddleware)
 
 # OAuth 2.0 Configuration
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
@@ -144,6 +151,18 @@ class UpdateUserSchema(BaseModel):
     field: str  # 'current_points' or 'current_swipes'
     value: int
 
+class LoginSchema(BaseModel):
+    username: str
+    password: str
+
+@app.post("/admin/login")
+def login(data: LoginSchema):
+    if data.username == "admin" and data.password == "care2share":  # Replace with actual database logic
+        token = create_access_token(data={"sub": data.username})
+        return {"access_token": token, "token_type": "bearer"}
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+
 @app.get("/admin/users")
 def get_all_users():
     db = SessionLocal()
@@ -185,7 +204,6 @@ def update_user(data: UpdateUserSchema, response: Response):
             logger.warning(f"CorrelationID: {cor_id} | User not found: {data.uni}")
             raise HTTPException(status_code=404, detail="User not found")
         
-        
         new_user = False
         if user.current_points == -1 or user.current_swipes == -1:
             new_user = True
@@ -219,7 +237,6 @@ def update_user(data: UpdateUserSchema, response: Response):
             user.current_swipes = current_swipes
 
         db.commit()
-        
         
         if new_user and (user.current_swipes >= 0 and user.current_points >= 0):
             # Send New User Initialization email
