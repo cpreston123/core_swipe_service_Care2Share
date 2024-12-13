@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 
 
 # Secret key and algorithm for token encoding/decoding
-SECRET_KEY = "your-secret-key"  
+SECRET_KEY = config("SECRET_KEY")
 ALGORITHM = "HS256"
 
 # Function to create an access token
