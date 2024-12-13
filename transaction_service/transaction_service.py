@@ -226,8 +226,6 @@ def get_user_transaction_history(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     request: Request = None
 ):
-    """Get paginated transaction history for a user (both donations and receipts)"""
-    cor_id = correlation_id.get()
     try:
         # Verify user exists
         user = db.query(User).filter(User.uni == uni).first()
