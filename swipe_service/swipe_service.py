@@ -340,7 +340,7 @@ def claim_points(request: Request, claim_request: ReceivePointsRequest, user_inf
     if update_response.status_code != 200:
         raise HTTPException(status_code=500, detail="Failed to update recipient's points")
     
-    subject = "Swipe Claim Successful!"
+    subject = "Point Claim Successful!"
     message_text = f"Hi {recipient_id},\n\nYou have successfully claimed {points} point(s). Enjoy your meal!"
     send_email(recipient_uni, subject, message_text)
 
