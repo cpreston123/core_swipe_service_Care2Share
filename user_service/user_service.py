@@ -113,9 +113,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     
 initialize_database()
 
-# Database setup
-DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
-
 # FastAPI application
 app = FastAPI()
 
