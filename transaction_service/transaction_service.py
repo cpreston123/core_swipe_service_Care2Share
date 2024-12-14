@@ -230,7 +230,7 @@ def get_user_transaction_history(
         # Verify user exists
         user = db.query(User).filter(User.uni == uni).first()
         if not user:
-            logger.warning(f"CorrelationID: {cor_id} | User not found: {uni}")
+            logger.warning(f"User not found: {uni}")
             raise HTTPException(status_code=404, detail="User not found")
             
         # Get total count for pagination
@@ -272,7 +272,7 @@ def get_user_transaction_history(
             prev=f"{base_url}transactions/history/{uni}?page={page-1}&page_size={page_size}" if page > 1 else None
         )
 
-        logger.info(f"CorrelationID: {cor_id} | Retrieved page {page} of transactions for user: {uni}")
+        logger.info(f"Retrieved page {page} of transactions for user: {uni}")
         return PaginatedResponse(
             items=transaction_responses,
             page=page,
@@ -283,7 +283,7 @@ def get_user_transaction_history(
         )
         
     except Exception as e:
-        logger.error(f"CorrelationID: {cor_id} | Error getting transaction history: {str(e)}")
+        logger.error(f"Error getting transaction history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/transactions/summary/{uni}", response_model=UserTransactionSummary)
@@ -334,3 +334,35 @@ def get_user_transaction_summary(
     except Exception as e:
         logger.error(f"CorrelationID: {cor_id} | Error getting transaction summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/transactions")
+def create_transaction(
+    uni: str,
+    transaction_data: dict,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None
+):
+    """Create a new transaction with authentication."""
+    cor_id = correlation_id.get()
+    print("transaction data: ", transaction_data)
+    try:
+        user = db.query(User).filter(User.uni == uni).first()
+        if not user:
+            logger.warning(f"CorrelationID: {cor_id} | User not found: {uni}")
+            raise HTTPException(status_code=404, detail="User not found")
+
+        transaction = Transaction(
+            swipe_id=transaction_data["swipe_id"],
+            donor_id=transaction_data["donor_id"],
+            recipient_id=transaction_data["recipient_id"],
+            transaction_date=transaction_data.get("transaction_date", datetime.utcnow())
+        )
+        db.add(transaction)
+        db.commit()
+
+        logger.info(f"Transaction created successfully: {transaction}")
+        return {"message": "Transaction created successfully."}
+    except Exception as e:
+        logger.error(f"Error creating transaction: {e}")
+        raise HTTPException(status_code=500, detail="Error creating transaction.")

@@ -1,3 +1,4 @@
+from typing import List
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from more_itertools import consume
 from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, DateTime
@@ -19,6 +20,11 @@ from models import Swipe, User, Transaction, Points
 from models.database import SessionLocal
 from decouple import config
 from auth_utils import validate_jwt_token
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -33,6 +39,14 @@ app.add_middleware(
 DATABASE_URL = "mysql+mysqlconnector://admin:care2share@care2share-db.clygygsmuyod.us-east-1.rds.amazonaws.com/care2share_database"
 
 USER_SERVICE_URL = "http://localhost:8002"
+
+# Dependency for database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class DonateSwipeRequest(BaseModel):
     donor_id: str
@@ -50,6 +64,18 @@ class ReceiveSwipeRequest(BaseModel):
 class ReceivePointsRequest(BaseModel):
     recipient_id: str
     points: int
+
+class DonatedSwipe(BaseModel):
+    swipe_id: int
+    uni: str
+    is_donated: bool
+
+    class Config:
+        orm_mode = True
+
+class DonatedSwipesResponse(BaseModel):
+    message: str
+    donated_swipes: List[DonatedSwipe]
 
 # OAuth 2.0 Configuration
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
@@ -155,10 +181,23 @@ def donate_swipe(request: Request, donate_request: DonateSwipeRequest, user_info
 
     return {"message": f"{swipes} swipe(s) donated successfully"}
 
+@app.get("/swipes/donated", response_model=DonatedSwipesResponse)
+def get_donated_swipes(db: Session = Depends(get_db)):
+    try:
+        donated_swipes = db.query(Swipe).filter(Swipe.is_donated == True).all()
+        return {
+            "message": "Donated swipes retrieved successfully",
+            "donated_swipes": donated_swipes
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving donated swipes: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving donated swipes.")
+
 @app.post("/swipes/claim")
 def claim_swipe(request: Request, claim_request: ReceiveSwipeRequest, user_info: dict = Depends(validate_jwt_token)):
     recipient_id = claim_request.recipient_id
     swipes_to_claim = claim_request.swipes_to_claim 
+    print("claim request: ", claim_request)
 
     if user_info.get("sub") != recipient_id:
         raise HTTPException(
@@ -187,13 +226,6 @@ def claim_swipe(request: Request, claim_request: ReceiveSwipeRequest, user_info:
             swipe.is_donated = False
             swipe.uni = recipient_id
             recipient.swipes_received += 1
-            transaction = Transaction(
-                swipe_id=swipe_id,
-                donor_id=donor_id,
-                recipient_id=recipient_id,
-                transaction_date=datetime.utcnow()
-            )
-            db.add(transaction)
             db.commit()
             donor_update_response = requests.put(
                 f"http://localhost:8001/users/{donor_id}",
@@ -263,11 +295,18 @@ def donate_points(request: Request, donate_request: DonatePointsRequest, user_in
     )
     if update_response.status_code != 200:
         raise HTTPException(status_code=500, detail="Failed to update donor's points")
+    
+    # Send email notification
+    subject = "Thank You for Donating Points!"
+    message_text = f"Hi {donor_id},\n\nThank you for donating {points_to_donate} point(s). Your generosity is greatly appreciated!"
+    send_email(donor["uni"], subject, message_text)
 
     return {"message": f"{points_to_donate} point(s) donated successfully"}
 
 @app.post("/points/claim")
 def claim_points(request: Request, claim_request: ReceivePointsRequest, user_info: dict = Depends(validate_jwt_token)):
+    recipient_id = claim_request.recipient_id
+    points = claim_request.points
     if user_info.get("sub") != claim_request.recipient_id:
         raise HTTPException(
             status_code=403, detail="You are not authorized to claim points for this user"
@@ -278,29 +317,34 @@ def claim_points(request: Request, claim_request: ReceivePointsRequest, user_inf
         raise HTTPException(status_code=401, detail="Authorization header is missing")
     
     with SessionLocal() as db:
-        recipient = db.query(User).filter(User.uni == claim_request.recipient_id).first()
+        recipient = db.query(User).filter(User.uni == recipient_id).first()
+        recipient_uni = recipient.uni
         if not recipient:
             raise HTTPException(status_code=404, detail="Recipient not found")
 
         points_row = db.query(Points).first()
-        if not points_row or points_row.points < claim_request.points:
+        if not points_row or points_row.points < points:
             raise HTTPException(status_code=400, detail="Not enough points available to claim")
 
-        recipient.points_received += claim_request.points
-        points_row.points -= claim_request.points
+        recipient.points_received += points
+        points_row.points -= points
         db.commit()  
 
     update_response = requests.put(
-        f"http://localhost:8001/users/{claim_request.recipient_id}",
-        json={"points": claim_request.points, "points_received": claim_request.points},
+        f"http://localhost:8001/users/{recipient_id}",
+        json={"points": points, "points_received": points},
         params={"is_relative": "true"},
         headers={"Authorization": auth_header}  
     )
 
     if update_response.status_code != 200:
         raise HTTPException(status_code=500, detail="Failed to update recipient's points")
+    
+    subject = "Swipe Claim Successful!"
+    message_text = f"Hi {recipient_id},\n\nYou have successfully claimed {points} point(s). Enjoy your meal!"
+    send_email(recipient_uni, subject, message_text)
 
-    return {"message": f"{claim_request.points} point(s) claimed successfully"}
+    return {"message": f"{points} point(s) claimed successfully"}
 
 if __name__ == "__main__":
     import uvicorn
