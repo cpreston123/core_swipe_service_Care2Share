@@ -334,3 +334,35 @@ def get_user_transaction_summary(
     except Exception as e:
         logger.error(f"CorrelationID: {cor_id} | Error getting transaction summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/transactions")
+def create_transaction(
+    uni: str,
+    transaction_data: dict,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request = None
+):
+    """Create a new transaction with authentication."""
+    cor_id = correlation_id.get()
+    print("transaction data: ", transaction_data)
+    try:
+        user = db.query(User).filter(User.uni == uni).first()
+        if not user:
+            logger.warning(f"CorrelationID: {cor_id} | User not found: {uni}")
+            raise HTTPException(status_code=404, detail="User not found")
+
+        transaction = Transaction(
+            swipe_id=transaction_data["swipe_id"],
+            donor_id=transaction_data["donor_id"],
+            recipient_id=transaction_data["recipient_id"],
+            transaction_date=transaction_data.get("transaction_date", datetime.utcnow())
+        )
+        db.add(transaction)
+        db.commit()
+
+        logger.info(f"Transaction created successfully: {transaction}")
+        return {"message": "Transaction created successfully."}
+    except Exception as e:
+        logger.error(f"Error creating transaction: {e}")
+        raise HTTPException(status_code=500, detail="Error creating transaction.")

@@ -39,9 +39,6 @@ from decouple import config
 from models import User, Swipe
 from models.database import SessionLocal, initialize_database
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
